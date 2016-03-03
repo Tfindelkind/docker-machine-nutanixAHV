@@ -1,20 +1,19 @@
 package nutanixAHV
 
 import (
-	"archive/tar"
-	"bytes"
-	"errors"
+	//"archive/tar"
+	//"bytes"
+	//"errors"
 	"fmt"
-	"io"
-	"io/ioutil"
+	//"io"
+	//"io/ioutil"
 	"os"
-	"path/filepath"
-	"strings"
-	"text/template"
+	//"path/filepath"
+	"strconv"
 	
 	//"github.com/alexzorin/libvirt-go"
 	
-	//"github.com/Tfindelkind/ntnx-golang-client-sdk"
+	"github.com/Tfindelkind/ntnx-golang-client-sdk"
 
 	"github.com/docker/machine/libmachine/drivers"
 	"github.com/docker/machine/libmachine/log"
@@ -25,52 +24,10 @@ import (
 )
 
 const (
-	connectionString   = "qemu:///system"
-	privateNetworkName = "docker-machines"
 	isoFilename        = "boot2docker.iso"
-	dnsmasqLeases      = "/var/lib/libvirt/dnsmasq/%s.leases"
-	dnsmasqStatus      = "/var/lib/libvirt/dnsmasq/%s.status"
-
-	domainXMLTemplate = `<domain type='kvm'>
-  <name>{{.MachineName}}</name> <memory unit='M'>{{.Memory}}</memory>
-  <vcpu>{{.CPU}}</vcpu>
-  <features><acpi/><apic/><pae/></features>
-  <os>
-    <type>hvm</type>
-    <boot dev='cdrom'/>
-    <boot dev='hd'/>
-    <bootmenu enable='no'/>
-  </os>
-  <devices>
-    <disk type='file' device='cdrom'>
-      <source file='{{.ISO}}'/>
-      <target dev='hdc' bus='ide'/>
-      <readonly/>
-    </disk>
-    <disk type='file' device='disk'>
-      <source file='{{.DiskPath}}'/>
-      <target dev='hda' bus='ide'/>
-    </disk>
-    <graphics type='vnc' autoport='yes' listen='127.0.0.1'>
-      <listen type='address' address='127.0.0.1'/>
-    </graphics>
-    <interface type='network'>
-      <source network='{{.Network}}'/>
-    </interface>
-    <interface type='network'>
-      <source network='{{.PrivateNetwork}}'/>
-    </interface>
-  </devices>
-</domain>`
-	networkXML = `<network>
-  <name>%s</name>
-  <ip address='%s' netmask='%s'>
-    <dhcp>
-      <range start='%s' end='%s'/>
-    </dhcp>
-  </ip>
-</network>`
+	containerName	   =  "defaul"
 )
+	
 
 type Driver struct {
 	*drivers.BaseDriver
@@ -92,38 +49,31 @@ type Driver struct {
 func (d *Driver) GetCreateFlags() []mcnflag.Flag {
 	return []mcnflag.Flag{
 		mcnflag.IntFlag{
-			Name:  "kvm-memory",
+			Name:  "nutanixAHV-memory",
 			Usage: "Size of memory for host in MB",
 			Value: 1024,
 		},
 		mcnflag.IntFlag{
-			Name:  "kvm-disk-size",
+			Name:  "nutanixAHV-disk-size",
 			Usage: "Size of disk for host in MB",
 			Value: 20000,
 		},
 		mcnflag.IntFlag{
-			Name:  "kvm-cpu-count",
+			Name:  "nutanixAHV-cpu-count",
 			Usage: "Number of CPUs",
 			Value: 1,
 		},
-		// TODO - support for multiple networks
 		mcnflag.StringFlag{
-			Name:  "kvm-network",
+			Name:  "nutanixAHV-network",
 			Usage: "Name of network to connect to",
 			Value: "default",
 		},
 		mcnflag.StringFlag{
-			EnvVar: "KVM_BOOT2DOCKER_URL",
-			Name:   "kvm-boot2docker-url",
+			EnvVar: "NUTANIXAHV_BOOT2DOCKER_URL",
+			Name:   "nutanixAHV-boot2docker-url",
 			Usage:  "The URL of the boot2docker image. Defaults to the latest available version",
 			Value:  "",
-		},
-		/* Not yet implemented
-		mcnflag.Flag{
-			Name:  "kvm-no-share",
-			Usage: "Disable the mount of your home directory",
-		},
-		*/
+		},		
 	}
 }
 
@@ -156,16 +106,16 @@ func (d *Driver) GetSSHUsername() string {
 }
 
 func (d *Driver) DriverName() string {
-	return "kvm"
+	return "nutanixAHV"
 }
 
 func (d *Driver) SetConfigFromFlags(flags drivers.DriverOptions) error {
 	log.Debugf("SetConfigFromFlags called")
-	d.Memory = flags.Int("kvm-memory")
-	d.DiskSize = flags.Int("kvm-disk-size")
-	d.CPU = flags.Int("kvm-cpu-count")
-	d.Network = flags.String("kvm-network")
-	d.Boot2DockerURL = flags.String("kvm-boot2docker-url")
+	d.Memory = flags.Int("nutanixAHV-memory")
+	d.DiskSize = flags.Int("nutanixAHV-disk-size")
+	d.CPU = flags.Int("nutanixAHV-cpu-count")
+	d.Network = flags.String("nutanixAHV-network")
+	d.Boot2DockerURL = flags.String("nutanixAHV-boot2docker-url")
 
 	d.SwarmMaster = flags.Bool("swarm-master")
 	d.SwarmHost = flags.String("swarm-host")
@@ -307,7 +257,7 @@ func (d *Driver) Create() error {
 		return err
 	}
 
-	// Libvirt typically runs as a deprivileged service account and
+	/* Libvirt typically runs as a deprivileged service account and
 	// needs the execute bit set for directories that contain disks
 	for dir := d.ResolveStorePath("."); dir != "/"; dir = filepath.Dir(dir) {
 		log.Debugf("Verifying executable bit set on %s", dir)
@@ -321,6 +271,21 @@ func (d *Driver) Create() error {
 			mode |= 0001
 			os.Chmod(dir, mode)
 		}
+	}*/
+
+	log.Infof("Creating VM...")
+	
+	vm := ntnxAPI.VM { strconv.Itoa(d.Memory) , d.MachineName, strconv.Itoa(d.CPU), d.Network, ""}
+	
+	if (ntnxAPI.VMExist(&n,&v)) {
+		 fmt.Println("VM already exists")
+		} else {
+			ntnxAPI.CreateVM(&n,&v)		
+	}
+	
+	virtualSwitch, err := d.chooseVirtualSwitch()
+	if err != nil {
+		return err
 	}
 
 	log.Debugf("Creating VM data disk...")
@@ -329,7 +294,7 @@ func (d *Driver) Create() error {
 	}
 
 	log.Debugf("Defining VM...")
-	tmpl, err := template.New("domain").Parse(domainXMLTemplate)
+	/*tmpl, err := template.New("domain").Parse(domainXMLTemplate)
 	if err != nil {
 		return err
 	}
@@ -337,7 +302,7 @@ func (d *Driver) Create() error {
 	err = tmpl.Execute(&xml, d)
 	if err != nil {
 		return err
-	}
+	}*/
 
 	/*vm, err := d.conn.DomainDefineXML(xml.String())
 	if err != nil {
@@ -526,7 +491,7 @@ func (d *Driver) getMAC() (string, error) {
 }
 
 func (d *Driver) getIPByMACFromLeaseFile(mac string) (string, error) {
-	leaseFile := fmt.Sprintf(dnsmasqLeases, d.PrivateNetwork)
+	/*leaseFile := fmt.Sprintf(dnsmasqLeases, d.PrivateNetwork)
 	data, err := ioutil.ReadFile(leaseFile)
 	if err != nil {
 		log.Debugf("Failed to retrieve dnsmasq leases from %s", leaseFile)
@@ -545,7 +510,7 @@ func (d *Driver) getIPByMACFromLeaseFile(mac string) (string, error) {
 			log.Debugf("IP address: %s", entries[2])
 			return entries[2], nil
 		}
-	}
+	} */
 	return "", nil
 }
 
@@ -609,7 +574,7 @@ func (d *Driver) publicSSHKeyPath() string {
 func (d *Driver) generateDiskImage(size int) error {
 	log.Debugf("Creating %d MB hard disk image...", size)
 
-	magicString := "boot2docker, please format-me"
+	/*magicString := "boot2docker, please format-me"
 
 	buf := new(bytes.Buffer)
 	tw := tar.NewWriter(buf)
