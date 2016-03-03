@@ -15,6 +15,8 @@ import (
 	"strings"
 	"text/template"
 	"time"
+	
+	"github.com/Tfindelkind/ntnx-golang-client-sdk"
 
 	"github.com/docker/machine/libmachine/drivers"
 	"github.com/docker/machine/libmachine/log"
