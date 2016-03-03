@@ -3,20 +3,18 @@ package nutanixAHV
 import (
 	"archive/tar"
 	"bytes"
-	"encoding/json"
-	"encoding/xml"
 	"errors"
 	"fmt"
-	"github.com/alexzorin/libvirt-go"
 	"io"
 	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
 	"text/template"
-	"time"
 	
-	"github.com/Tfindelkind/ntnx-golang-client-sdk"
+	//"github.com/alexzorin/libvirt-go"
+	
+	//"github.com/Tfindelkind/ntnx-golang-client-sdk"
 
 	"github.com/docker/machine/libmachine/drivers"
 	"github.com/docker/machine/libmachine/log"
@@ -88,8 +86,6 @@ type Driver struct {
 	PrivateKeyPath   string
 	DiskPath         string
 	connectionString string
-	conn             *libvirt.VirConnection
-	VM               *libvirt.VirDomain
 	vmLoaded         bool
 }
 
@@ -197,8 +193,8 @@ func (d *Driver) GetURL() (string, error) {
 // Create, or verify the private network is properly configured
 func (d *Driver) validatePrivateNetwork() error {
 	log.Debug("Validating private network")
-	network, err := d.conn.LookupNetworkByName(d.PrivateNetwork)
-	if err == nil {
+	/*network, err := d.conn.LookupNetworkByName(d.PrivateNetwork)
+	if 1 == 2 {
 		xmldoc, err := network.GetXMLDesc(0)
 		if err != nil {
 			return err
@@ -210,7 +206,7 @@ func (d *Driver) validatePrivateNetwork() error {
 		        <dhcp>
 		            <range start='a.b.c.d' end='w.x.y.z'/>
 		        </dhcp>
-		*/
+
 		type Ip struct {
 			Address string `xml:"address,attr"`
 			Netmask string `xml:"netmask,attr"`
@@ -246,7 +242,7 @@ func (d *Driver) validatePrivateNetwork() error {
 		"255.255.255.0",
 		"192.168.42.2",
 		"192.168.42.254")
-	network, err = d.conn.NetworkDefineXML(xml)
+	//network, err = d.conn.NetworkDefineXML(xml)
 	if err != nil {
 		log.Errorf("Failed to create private network: %s", err)
 		return nil
@@ -259,17 +255,17 @@ func (d *Driver) validatePrivateNetwork() error {
 	if err != nil {
 		log.Warnf("Failed to Start network: %s", err)
 		return err
-	}
+	} */
 	return nil
 }
 
 func (d *Driver) validateNetwork(name string) error {
 	log.Debugf("Validating network %s", name)
-	_, err := d.conn.LookupNetworkByName(name)
+	/*_, err := d.conn.LookupNetworkByName(name)
 	if err != nil {
 		log.Errorf("Unable to locate network %s", name)
 		return err
-	}
+	}*/
 	return nil
 }
 
@@ -279,7 +275,7 @@ func (d *Driver) PreCreateCheck() error {
 	log.Debug("About to check libvirt version")
 
 	// TODO might want to check minimum version
-	_, err := d.conn.GetLibVersion()
+	/*_, err := d.conn.GetLibVersion()
 	if err != nil {
 		log.Warnf("Unable to get libvirt version")
 		return err
@@ -292,7 +288,7 @@ func (d *Driver) PreCreateCheck() error {
 	if err != nil {
 		return err
 	}
-	// Others...?
+	// Others...? */
 	return nil
 }
 
@@ -343,21 +339,22 @@ func (d *Driver) Create() error {
 		return err
 	}
 
-	vm, err := d.conn.DomainDefineXML(xml.String())
+	/*vm, err := d.conn.DomainDefineXML(xml.String())
 	if err != nil {
 		log.Warnf("Failed to create the VM: %s", err)
 		return err
 	}
+	 
 	d.VM = &vm
 	d.vmLoaded = true
-
+	*/
 	return d.Start()
 }
 
 func (d *Driver) Start() error {
 	log.Debugf("Starting VM %s", d.MachineName)
 	d.validateVMRef()
-	err := d.VM.Create()
+	/*err := d.VM.Create()
 	if err != nil {
 		log.Warnf("Failed to start: %s", err)
 		return err
@@ -376,12 +373,12 @@ func (d *Driver) Start() error {
 		}
 		log.Debugf("Waiting for the VM to come up... %d", i)
 	}
-	log.Warnf("Unable to determine VM's IP address, did it fail to boot?")
-	return err
+	log.Warnf("Unable to determine VM's IP address, did it fail to boot?") */
+	return nil 
 }
 
 func (d *Driver) Stop() error {
-	log.Debugf("Stopping VM %s", d.MachineName)
+	/*log.Debugf("Stopping VM %s", d.MachineName)
 	d.validateVMRef()
 	s, err := d.GetState()
 	if err != nil {
@@ -403,18 +400,19 @@ func (d *Driver) Stop() error {
 			}
 		}
 		return errors.New("VM Failed to gracefully shutdown, try the kill command")
-	}
+	}*/
 	return nil
 }
 
 func (d *Driver) Remove() error {
-	log.Debugf("Removing VM %s", d.MachineName)
+	/*log.Debugf("Removing VM %s", d.MachineName)
 	d.validateVMRef()
 	// Note: If we switch to qcow disks instead of raw the user
 	//       could take a snapshot.  If you do, then Undefine
 	//       will fail unless we nuke the snapshots first
-	d.VM.Destroy() // Ignore errors
-	return d.VM.Undefine()
+	// d.VM.Destroy() // Ignore errors
+	return d.VM.Undefine() */
+	return nil
 }
 
 func (d *Driver) Restart() error {
@@ -426,13 +424,15 @@ func (d *Driver) Restart() error {
 }
 
 func (d *Driver) Kill() error {
-	log.Debugf("Killing VM %s", d.MachineName)
+	/*log.Debugf("Killing VM %s", d.MachineName)
 	d.validateVMRef()
 	return d.VM.Destroy()
+	*/
+	return nil
 }
 
 func (d *Driver) GetState() (state.State, error) {
-	log.Debugf("Getting current state...")
+	/*log.Debugf("Getting current state...")
 	d.validateVMRef()
 	states, err := d.VM.GetState()
 	if err != nil {
@@ -456,12 +456,12 @@ func (d *Driver) GetState() (state.State, error) {
 		return state.Saved, nil
 	case libvirt.VIR_DOMAIN_SHUTOFF:
 		return state.Stopped, nil
-	}
+	}*/
 	return state.None, nil
 }
 
 func (d *Driver) validateVMRef() {
-	if !d.vmLoaded {
+	/*if !d.vmLoaded {
 		log.Debugf("Fetching VM...")
 		vm, err := d.conn.LookupDomainByName(d.MachineName)
 		if err != nil {
@@ -470,13 +470,13 @@ func (d *Driver) validateVMRef() {
 			d.VM = &vm
 			d.vmLoaded = true
 		}
-	}
+	}*/
 }
 
 // This implementation is specific to default networking in libvirt
 // with dnsmasq
 func (d *Driver) getMAC() (string, error) {
-	d.validateVMRef()
+	/*d.validateVMRef()
 	xmldoc, err := d.VM.GetXMLDesc(0)
 	if err != nil {
 		return "", err
@@ -492,7 +492,7 @@ func (d *Driver) getMAC() (string, error) {
 	            ...
 	        </interface>
 	        ...
-	*/
+	
 	type Mac struct {
 		Address string `xml:"address,attr"`
 	}
@@ -521,7 +521,8 @@ func (d *Driver) getMAC() (string, error) {
 		return "", fmt.Errorf("VM doesn't have enough network interfaces.  Expected at least 2, found %d",
 			len(dom.Devices.Interfaces))
 	}
-	return dom.Devices.Interfaces[1].Mac.Address, nil
+	return dom.Devices.Interfaces[1].Mac.Address, nil  */
+	return "", nil
 }
 
 func (d *Driver) getIPByMACFromLeaseFile(mac string) (string, error) {
@@ -549,7 +550,7 @@ func (d *Driver) getIPByMACFromLeaseFile(mac string) (string, error) {
 }
 
 func (d *Driver) getIPByMacFromSettings(mac string) (string, error) {
-	network, err := d.conn.LookupNetworkByName(d.PrivateNetwork)
+	/*network, err := d.conn.LookupNetworkByName(d.PrivateNetwork)
 	if err != nil {
 		log.Warnf("Failed to find network: %s", err)
 		return "", err
@@ -578,7 +579,7 @@ func (d *Driver) getIPByMacFromSettings(mac string) (string, error) {
 			log.Debugf("IP address: %s", value.Ip_address)
 			return value.Ip_address, nil
 		}
-	}
+	} */
 	return "", nil
 }
 
@@ -672,18 +673,13 @@ func createDiskImage(dest string, size int, r io.Reader) error {
 }
 
 func NewDriver(hostName, storePath string) drivers.Driver {
-	conn, err := libvirt.NewVirConnection(connectionString)
+	/*conn, err := libvirt.NewVirConnection(connectionString)
 	if err != nil {
 		log.Errorf("Failed to connect to libvirt: %s", err)
 		os.Exit(1)
 	}
+   */
 
-	return &Driver{
-		conn:           &conn,
-		PrivateNetwork: privateNetworkName,
-		BaseDriver: &drivers.BaseDriver{
-			MachineName: hostName,
-			StorePath:   storePath,
-		},
-	}
+	return &Driver{	}
+	
 }
