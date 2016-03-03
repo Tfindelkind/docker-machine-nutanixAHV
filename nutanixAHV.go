@@ -1,4 +1,4 @@
-package kvm
+package nutanixAHV
 
 import (
 	"archive/tar"
