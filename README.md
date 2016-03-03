@@ -1,5 +1,5 @@
-# docker-machine-kvm
-KVM driver for docker-machine
+# docker-machine-nutanixAHV
+Nutanix AHV (Acropolis Hypervisor) driver for docker-machine
 
 This driver leverages the new [plugin architecture](https://github.com/docker/machine/issues/1626) being
 developed for Docker Machine.
