@@ -1,10 +1,10 @@
 package main
 
 import (
-	"github.com/dhiltgen/docker-machine-kvm"
+	"github.com/tfindelkind/docker-machine-nutanixAHV"
 	"github.com/docker/machine/libmachine/drivers/plugin"
 )
 
 func main() {
-	plugin.RegisterDriver(kvm.NewDriver("default", "path"))
+	plugin.RegisterDriver(nutanix.NewDriver("default", "path"))
 }
