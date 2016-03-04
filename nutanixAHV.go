@@ -332,7 +332,7 @@ func (d *Driver) Create() error {
 			ntnxAPI.CreateVM(&d.nc,&d.vm)		
 	}
 	
-	ntnxAPI.GetVMIDbyName(&d.nc,d.MachineName)
+	d.vm.UUID = ntnxAPI.GetVMIDbyName(&d.nc,d.MachineName)
 	
 	log.Debugf("Creating VM data disk...")
 	
