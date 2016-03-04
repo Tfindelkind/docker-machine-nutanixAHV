@@ -10,7 +10,6 @@ import (
 	//"io/ioutil"
 	"os"
 	//"path/filepath"
-	"strconv"
 	
 	//"github.com/alexzorin/libvirt-go"
 	
@@ -25,56 +24,47 @@ import (
 )
 
 const (
-	isoFilename        	= "boot2docker.iso"
-	containerName	   	= "default"
-	defaultUser   		= "admin"
-	defaultPass   		= "nutanix/4u"
-	defaultDiskSize	   	= 20480
-	defaultMemory	   	= 1024
-	defaultCpus		   	= 1 		
-	defaultNetwork	   	= "default"
+	isoFilename        		= "boot2docker.iso"	
+	driverName				= "nutanixAHV"
+	defaultUser   			= "admin"
+	defaultPass   			= "nutanix/4u"
+	defaultMaxCapacityBytes	= "20480"
+	defaultMemoryMB	   		= "1024"
+	defaultVcpus			= "1" 		
+	defaultNetworkName 		= "default"
+	defaultContainerName	= "default"
 	// REMOVE 
 	defaultHost			= "192.168.178.41"	
 )
 
-	
+const (
+	sshUser				= "docker"
+	sshPort				= 22
+)
 
 type Driver struct {
 	*drivers.BaseDriver
-
-	Memory           int
-	DiskSize         int
-	CPU              int
-	Network          string
-	PrivateNetwork   string
-	ISO              string
-	Boot2DockerURL   string
-	CaCertPath       string
-	PrivateKeyPath   string
-	DiskPath         string
-	connectionString string
-	vmLoaded         bool
+	NutanixHost			string
+	Username			string
+	Password			string
+	MemoryMB         	string
+	Vcpus            	string
+	MaxCapacityBytes 	string
+	NetworkName     	string
+	ContainerName		string
+	ISO              	string
+	Boot2DockerURL   	string
+	nc					ntnxAPI.NTNXConnection
+	vm					ntnxAPI.VM
+	im					ntnxAPI.Image
+	vdisk				ntnxAPI.VDisk
+	nic					ntnxAPI.Network
 }
 
 func (d *Driver) GetCreateFlags() []mcnflag.Flag {
 	return []mcnflag.Flag{
-		mcnflag.IntFlag{
-			Name:  "nutanixAHV-memory",
-			Usage: "Size of memory for host in MB",
-			Value: defaultMemory,
-		},
-		mcnflag.IntFlag{
-			Name:  "nutanixAHV-disk-size",
-			Usage: "Size of disk for host in MB",
-			Value: defaultDiskSize,
-		},
-		mcnflag.IntFlag{
-			Name:  "nutanixAHV-cpu-count",
-			Usage: "Number of CPUs",
-			Value: defaultCpus,
-		},
 		mcnflag.StringFlag{
-			Name: 	"nutanixAHV-Server",
+			Name: 	"nutanixAHV-host",
 			Usage: 	"Nutanix Cluster or CVM IP/Name",
 			Value: 	defaultHost,
 		},		
@@ -89,9 +79,30 @@ func (d *Driver) GetCreateFlags() []mcnflag.Flag {
 			Value: 	defaultPass,
 		},
 		mcnflag.StringFlag{
-			Name:  "nutanixAHV-network",
+			Name:  "nutanixAHV-memory-mb",
+			Usage: "Size of memory for host in MB",
+			Value: defaultMemoryMB,
+		},
+		mcnflag.StringFlag{
+			Name:  "nutanixAHV-max-capacity-bytes",
+			Usage: "Size of disk for host in MB",
+			Value: defaultMaxCapacityBytes,
+		},
+		mcnflag.StringFlag{
+			Name:  "nutanixAHV-vcpus",
+			Usage: "Number of Vcpus",
+			Value: defaultVcpus,
+		},
+		
+		mcnflag.StringFlag{
+			Name:  "nutanixAHV-network-name",
 			Usage: "Name of network to connect to",
-			Value: defaultNetwork,
+			Value: defaultNetworkName,
+		},
+		mcnflag.StringFlag{
+			Name:  "nutanixAHV-container-name",
+			Usage: "Name of container used for vDisk",
+			Value: defaultContainerName,
 		},
 		mcnflag.StringFlag{
 			EnvVar: "NUTANIXAHV_BOOT2DOCKER_URL",
@@ -116,7 +127,7 @@ func (d *Driver) GetSSHKeyPath() string {
 
 func (d *Driver) GetSSHPort() (int, error) {
 	if d.SSHPort == 0 {
-		d.SSHPort = 22
+		d.SSHPort = sshPort
 	}
 
 	return d.SSHPort, nil
@@ -124,31 +135,36 @@ func (d *Driver) GetSSHPort() (int, error) {
 
 func (d *Driver) GetSSHUsername() string {
 	if d.SSHUser == "" {
-		d.SSHUser = "docker"
+		d.SSHUser = sshUser
 	}
 
 	return d.SSHUser
 }
 
 func (d *Driver) DriverName() string {
-	return "nutanixAHV"
+	return driverName
 }
 
 func (d *Driver) SetConfigFromFlags(flags drivers.DriverOptions) error {
 	log.Debugf("SetConfigFromFlags called")
-	d.Memory = flags.Int("nutanixAHV-memory")
-	d.DiskSize = flags.Int("nutanixAHV-disk-size")
-	d.CPU = flags.Int("nutanixAHV-cpu-count")
-	d.Network = flags.String("nutanixAHV-network")
+	
+	d.NutanixHost= flags.String("nutanixAHV-nutanix-host")
+	d.Username = flags.String("nutanixAHV-username")
+	d.Password = flags.String("nutanixAHV-password")
+	d.MemoryMB = flags.String("nutanixAHV-memory-mb")
+	d.MaxCapacityBytes = flags.String("nutanixAHV-max-capacity-bytes")
+	d.Vcpus = flags.String("nutanixAHV-vcpus")
+	d.NetworkName = flags.String("nutanixAHV-network-name")
+	d.ContainerName = flags.String("nutanixAHV-container-name")
+	
 	d.Boot2DockerURL = flags.String("nutanixAHV-boot2docker-url")
 
 	d.SwarmMaster = flags.Bool("swarm-master")
 	d.SwarmHost = flags.String("swarm-host")
 	d.SwarmDiscovery = flags.String("swarm-discovery")
 	d.ISO = d.ResolveStorePath(isoFilename)
-	d.SSHUser = "docker"
-	d.SSHPort = 22
-	d.DiskPath = d.ResolveStorePath(fmt.Sprintf("%s.img", d.MachineName))
+	d.SSHUser = sshUser
+	d.SSHPort = sshPort
 	return nil
 }
 
@@ -300,27 +316,32 @@ func (d *Driver) Create() error {
 
 	log.Infof("Setup Nutanix REST connection...")
 	
-	nc := ntnxAPI.NTNXConnection { defaultHost, defaultUser, defaultPass, "",  http.Client{}}
+	
+	d.nc = ntnxAPI.NTNXConnection { defaultHost, defaultUser, defaultPass, "",  http.Client{}}
 		 	
-	ntnxAPI.EncodeCredentials(&nc)
-	ntnxAPI.CreateHttpClient(&nc)
+	ntnxAPI.EncodeCredentials(&d.nc)
+	ntnxAPI.CreateHttpClient(&d.nc)
 	
 	log.Infof("Creating VM...")
 	
-	vm := ntnxAPI.VM { strconv.Itoa(d.Memory) , d.MachineName, strconv.Itoa(d.CPU), d.Network, ""}
+	d.vm = ntnxAPI.VM { d.MemoryMB , d.MachineName, d.Vcpus, d.NetworkName, ""}
 	
-	if (ntnxAPI.VMExist(&nc,&vm)) {
+	if (ntnxAPI.VMExist(&d.nc,&d.vm)) {
 		 fmt.Println("VM already exists")
 		} else {
-			ntnxAPI.CreateVM(&nc,&vm)		
+			ntnxAPI.CreateVM(&d.nc,&d.vm)		
 	}
 	
-/*	virtualSwitch, err := d.chooseVirtualSwitch()
-	if err != nil {
-		return err
-	}*/
-
+	ntnxAPI.GetVMIDbyName(&d.nc,d.MachineName)
+	
 	log.Debugf("Creating VM data disk...")
+	
+	d.vdisk = ntnxAPI.VDisk { d.ContainerName, ntnxAPI.GetContainerIDbyName(&d.nc,d.ContainerName), "", d.MaxCapacityBytes,"",false }
+	
+	ntnxAPI.CreateVDiskforVM(&d.nc,&d.vm,&d.vdisk)
+	 
+	//ntnxAPI.GetNetworkID(&n,&nic1)
+	//ntnxAPI.CreateVNicforVM(&n, &v,&nic1)
 	/*if err := d.generateDiskImage(d.DiskSize); err != nil {
 		return err
 	}*/
