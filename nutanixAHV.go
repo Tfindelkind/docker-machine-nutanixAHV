@@ -5,7 +5,8 @@ import (
 	//"bytes"
 	//"errors"
 	"fmt"
-	//"io"
+	"net/http"
+	"io"
 	//"io/ioutil"
 	"os"
 	//"path/filepath"
@@ -24,9 +25,18 @@ import (
 )
 
 const (
-	isoFilename        = "boot2docker.iso"
-	containerName	   =  "defaul"
+	isoFilename        	= "boot2docker.iso"
+	containerName	   	= "default"
+	defaultUser   		= "admin"
+	defaultPass   		= "nutanix/4u"
+	defaultDiskSize	   	= 20480
+	defaultMemory	   	= 1024
+	defaultCpus		   	= 1 		
+	defaultNetwork	   	= "default"
+	// REMOVE 
+	defaultHost			= "192.168.178.41"	
 )
+
 	
 
 type Driver struct {
@@ -51,22 +61,37 @@ func (d *Driver) GetCreateFlags() []mcnflag.Flag {
 		mcnflag.IntFlag{
 			Name:  "nutanixAHV-memory",
 			Usage: "Size of memory for host in MB",
-			Value: 1024,
+			Value: defaultMemory,
 		},
 		mcnflag.IntFlag{
 			Name:  "nutanixAHV-disk-size",
 			Usage: "Size of disk for host in MB",
-			Value: 20000,
+			Value: defaultDiskSize,
 		},
 		mcnflag.IntFlag{
 			Name:  "nutanixAHV-cpu-count",
 			Usage: "Number of CPUs",
-			Value: 1,
+			Value: defaultCpus,
+		},
+		mcnflag.StringFlag{
+			Name: 	"nutanixAHV-Server",
+			Usage: 	"Nutanix Cluster or CVM IP/Name",
+			Value: 	defaultHost,
+		},		
+		mcnflag.StringFlag{
+			Name: 	"nutanixAHV-username",
+			Usage:  "Nutanix username",
+			Value: 	defaultUser,
+		},
+		mcnflag.StringFlag{
+			Name:   "nutanixAHV-password",
+			Usage:  "Nutanix password",
+			Value: 	defaultPass,
 		},
 		mcnflag.StringFlag{
 			Name:  "nutanixAHV-network",
 			Usage: "Name of network to connect to",
-			Value: "default",
+			Value: defaultNetwork,
 		},
 		mcnflag.StringFlag{
 			EnvVar: "NUTANIXAHV_BOOT2DOCKER_URL",
@@ -273,25 +298,32 @@ func (d *Driver) Create() error {
 		}
 	}*/
 
+	log.Infof("Setup Nutanix REST connection...")
+	
+	nc := ntnxAPI.NTNXConnection { defaultHost, defaultUser, defaultPass, "",  http.Client{}}
+		 	
+	ntnxAPI.EncodeCredentials(&nc)
+	ntnxAPI.CreateHttpClient(&nc)
+	
 	log.Infof("Creating VM...")
 	
 	vm := ntnxAPI.VM { strconv.Itoa(d.Memory) , d.MachineName, strconv.Itoa(d.CPU), d.Network, ""}
 	
-	if (ntnxAPI.VMExist(&n,&v)) {
+	if (ntnxAPI.VMExist(&nc,&vm)) {
 		 fmt.Println("VM already exists")
 		} else {
-			ntnxAPI.CreateVM(&n,&v)		
+			ntnxAPI.CreateVM(&nc,&vm)		
 	}
 	
-	virtualSwitch, err := d.chooseVirtualSwitch()
+/*	virtualSwitch, err := d.chooseVirtualSwitch()
 	if err != nil {
 		return err
-	}
+	}*/
 
 	log.Debugf("Creating VM data disk...")
-	if err := d.generateDiskImage(d.DiskSize); err != nil {
+	/*if err := d.generateDiskImage(d.DiskSize); err != nil {
 		return err
-	}
+	}*/
 
 	log.Debugf("Defining VM...")
 	/*tmpl, err := template.New("domain").Parse(domainXMLTemplate)
@@ -570,52 +602,7 @@ func (d *Driver) publicSSHKeyPath() string {
 	return d.GetSSHKeyPath() + ".pub"
 }
 
-// Make a boot2docker VM disk image.
-func (d *Driver) generateDiskImage(size int) error {
-	log.Debugf("Creating %d MB hard disk image...", size)
 
-	/*magicString := "boot2docker, please format-me"
-
-	buf := new(bytes.Buffer)
-	tw := tar.NewWriter(buf)
-
-	// magicString first so the automount script knows to format the disk
-	file := &tar.Header{Name: magicString, Size: int64(len(magicString))}
-	if err := tw.WriteHeader(file); err != nil {
-		return err
-	}
-	if _, err := tw.Write([]byte(magicString)); err != nil {
-		return err
-	}
-	// .ssh/key.pub => authorized_keys
-	file = &tar.Header{Name: ".ssh", Typeflag: tar.TypeDir, Mode: 0700}
-	if err := tw.WriteHeader(file); err != nil {
-		return err
-	}
-	pubKey, err := ioutil.ReadFile(d.publicSSHKeyPath())
-	if err != nil {
-		return err
-	}
-	file = &tar.Header{Name: ".ssh/authorized_keys", Size: int64(len(pubKey)), Mode: 0644}
-	if err := tw.WriteHeader(file); err != nil {
-		return err
-	}
-	if _, err := tw.Write([]byte(pubKey)); err != nil {
-		return err
-	}
-	file = &tar.Header{Name: ".ssh/authorized_keys2", Size: int64(len(pubKey)), Mode: 0644}
-	if err := tw.WriteHeader(file); err != nil {
-		return err
-	}
-	if _, err := tw.Write([]byte(pubKey)); err != nil {
-		return err
-	}
-	if err := tw.Close(); err != nil {
-		return err
-	}
-	raw := bytes.NewReader(buf.Bytes())
-	return createDiskImage(d.DiskPath, size, raw)
-}
 
 // createDiskImage makes a disk image at dest with the given size in MB. If r is
 // not nil, it will be read as a raw disk image to convert from.
@@ -642,8 +629,7 @@ func NewDriver(hostName, storePath string) drivers.Driver {
 	if err != nil {
 		log.Errorf("Failed to connect to libvirt: %s", err)
 		os.Exit(1)
-	}
-   */
+	}*/
 
 	return &Driver{	}
 	
