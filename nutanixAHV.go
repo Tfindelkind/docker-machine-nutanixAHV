@@ -2,15 +2,19 @@ package nutanixAHV
 
 import (
 	"archive/tar"
-	//"bytes"
+	"strconv"
 	//"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"io/ioutil"
+	"io"
 	"os"
+	"time"
 	//"path/filepath"
 	
-	//"github.com/alexzorin/libvirt-go"
+	// rename because duplicated package name
+	gssh "golang.org/x/crypto/ssh"
 	
 	"github.com/Tfindelkind/ntnx-golang-client-sdk"
 
@@ -39,7 +43,16 @@ const (
 
 const (
 	sshUser				= "docker"
+	sshPassword 		= "tcuser"
 	sshPort				= 22
+)
+
+const (
+	SCP_PUSH_BEGIN_FILE       = "C"
+	SCP_PUSH_BEGIN_FOLDER     = "D"
+	SCP_PUSH_BEGIN_END_FOLDER = " 0"
+	SCP_PUSH_END_FOLDER       = "E"
+	SCP_PUSH_END              = "\x00"
 )
 
 type Driver struct {
@@ -205,6 +218,8 @@ func (d *Driver) PreCreateCheck() error {
 }
 
 func (d *Driver) Create() error {
+	
+	
 	b2dutils := mcnutils.NewB2dUtils(d.StorePath)
 	if err := b2dutils.CopyIsoToMachineDir(d.Boot2DockerURL, d.MachineName); err != nil {
 		return err
@@ -215,9 +230,7 @@ func (d *Driver) Create() error {
 		return err
 	}
 	
-	fmt.Println(d.GetSSHKeyPath()+".pub")
-	
-
+	fmt.Println(d.GetSSHKeyPath()+".pub")	
 
 	//if err := os.MkdirAll(d.ResolveStorePath("."), 0755); err != nil {
 	//	return err
@@ -226,28 +239,15 @@ func (d *Driver) Create() error {
 	log.Infof("Setup Nutanix REST connection...")
 	
 	
-	d.nc = ntnxAPI.NTNXConnection { defaultHost, defaultUser, defaultPass, "",  http.Client{}}
-		 	
-	ntnxAPI.EncodeCredentials(&d.nc)
-	ntnxAPI.CreateHttpClient(&d.nc)
+	d.initConnection()
 	
 	log.Infof("Creating VM...")
 	
-	d.vm = ntnxAPI.VM { d.MemoryMB , d.MachineName, d.Vcpus, d.NetworkName, ""}
-	
-	if (ntnxAPI.VMExist(&d.nc,&d.vm)) {
-		 fmt.Println("VM already exists")
-		} else {
-			ntnxAPI.CreateVM(&d.nc,&d.vm)		
-	}
+	d.initVM()
 	
 	fmt.Println("Insert boot2docker into CDROM ...")
 	
-	d.vm.UUID = ntnxAPI.GetVMIDbyName(&d.nc,d.MachineName)
 	
-	log.Infof("Insert boot2docker into CDROM ...")
-	
-	fmt.Println("Insert boot2docker into CDROM ...")
 	
 	d.im = ntnxAPI.Image { d.ImageName, "", "ISO_IMAGE", "",  ntnxAPI.GetImageIDbyName(&d.nc,d.ImageName)}
 	
@@ -255,84 +255,112 @@ func (d *Driver) Create() error {
 	
 	log.Infof("Creating VM data disk...")
 	
-	// create vdisk struct with some empty values which will be set later
+	// create vdisk struct with some empty values which will be set via CreateVDiskforVM later
 	d.vdisk = ntnxAPI.VDisk { d.ContainerName, ntnxAPI.GetContainerIDbyName(&d.nc,d.ContainerName), "", d.MaxCapacityBytes,"",false }
 	
 	ntnxAPI.CreateVDiskforVM(&d.nc,&d.vm,&d.vdisk)
 	 
 	log.Debugf("Creating VM network...")
 	
-	// create network struct with some empty values which will be set later
+	// create network struct with some empty values which will be set via CreateVNicforVM later
 	d.nic = ntnxAPI.Network { d.NetworkName, ntnxAPI.GetNetworkIDbyName(&d.nc, d.NetworkName), 0 }
 	
 	ntnxAPI.CreateVNicforVM(&d.nc,&d.vm,&d.nic)
 	
 	log.Infof("Provisioning certs and ssh keys...")
 	// Generate a tar keys bundle
+
+	d.Start()
+
+	log.Infof("Waiting for VM to come online...")
+	
+	var ip string
+	var err error
+	for i := 1; i <= 60; i++ {
+		ip, err = ntnxAPI.GetVMIP(&d.nc,&d.vm)
+		if err != nil {
+			log.Debugf("Not there yet %d/%d, error: %s", i, 60, err)
+			time.Sleep(2 * time.Second)
+			continue
+		}
+
+		if ip != "" {
+			log.Debugf("Got an ip: %s", ip)
+			conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", ip, 22), time.Duration(2*time.Second))
+			if err != nil {
+				log.Debugf("SSH Daemon not responding yet: %s", err)
+				time.Sleep(2 * time.Second)
+				continue
+			}
+			conn.Close()
+			break
+		}
+	}
+	
+	// Generate a tar keys bundle
 	if err := d.generateKeyBundle(); err != nil {
 		return err
 	}
-
 	//uploading ssh keybundle tar xf /var/lib/boot2docker/userdata.tar -C /home/docker/ > /var/log/userdata.log 2>&1
 	
+	config := &gssh.ClientConfig{
+        User: sshUser,
+        Auth: []gssh.AuthMethod {
+            gssh.Password(sshPassword),
+        },
+    }
+    client, err := gssh.Dial("tcp", ip+":"+strconv.Itoa(sshPort), config)
+    if err != nil {
+        panic("Failed to dial: " + err.Error())
+    }
+
+    session, err := client.NewSession()
+    if err != nil {
+        panic("Failed to create session: " + err.Error())
+    }
+    defer session.Close()
+
+
+    go func() {
+		fmt.Println(d.ResolveStorePath("userdata.tar"))
+		w, _ := session.StdinPipe()
+		defer w.Close()
+		fileSrc, err := os.Open(d.ResolveStorePath("userdata.tar"))
+		if err != nil {
+			log.Debugf("Failed to open source file: ", err)
+	
+		}
+		defer fileSrc.Close()
+		//Get file size
+		srcStat, err := fileSrc.Stat()
+		if err != nil {
+			log.Debugf("Failed to stat file: ", err)
+		
+		}
+		// According to https://blogs.oracle.com/janp/entry/how_the_scp_protocol_works
+		// Print the file content
+		mode := SCP_PUSH_BEGIN_FILE + GetPerm(fileSrc)
+		fmt.Fprintln(w, mode, srcStat.Size(), "userdata.tar")
+		io.Copy(w, fileSrc)
+		fmt.Fprint(w, SCP_PUSH_END)
+		}()
+    if err := session.Run("scp -tr ./"); err != nil {
+        panic("Failed to run: "+ err.Error())
+    }	
+    
+    session, err = client.NewSession()
+    if err != nil {
+        panic("Failed to create session: " + err.Error())
+    }
+    defer session.Close()
+    
+	if err := session.Run("sudo mv ./userdata.tar /var/lib/boot2docker/ ; tar xf /var/lib/boot2docker/userdata.tar -C /home/docker/ > /var/log/userdata.log 2>&1"); err != nil {
+    panic("Failed to run: " + err.Error())
+	}
+
 	d.vmLoaded = true
 	
-	return d.Start()
-}
-
-// Make a boot2docker userdata.tar key bundle
-func (d *Driver) generateKeyBundle() error {
-	log.Debugf("Creating Tar key bundle...")
-
-	magicString := "boot2docker, this is nutanix speaking"
-
-	tf, err := os.Create(d.ResolveStorePath("userdata.tar"))
-	if err != nil {
-		return err
-	}
-	defer tf.Close()
-	var fileWriter = tf
-
-	tw := tar.NewWriter(fileWriter)
-	defer tw.Close()
-
-	// magicString first so we can figure out who originally wrote the tar.
-	file := &tar.Header{Name: magicString, Size: int64(len(magicString))}
-	if err := tw.WriteHeader(file); err != nil {
-		return err
-	}
-	if _, err := tw.Write([]byte(magicString)); err != nil {
-		return err
-	}
-	// .ssh/key.pub => authorized_keys
-	file = &tar.Header{Name: ".ssh", Typeflag: tar.TypeDir, Mode: 0700}
-	if err := tw.WriteHeader(file); err != nil {
-		return err
-	}
-	pubKey, err := ioutil.ReadFile(d.publicSSHKeyPath())
-	if err != nil {
-		return err
-	}
-	file = &tar.Header{Name: ".ssh/authorized_keys", Size: int64(len(pubKey)), Mode: 0644}
-	if err := tw.WriteHeader(file); err != nil {
-		return err
-	}
-	if _, err := tw.Write([]byte(pubKey)); err != nil {
-		return err
-	}
-	file = &tar.Header{Name: ".ssh/authorized_keys2", Size: int64(len(pubKey)), Mode: 0644}
-	if err := tw.WriteHeader(file); err != nil {
-		return err
-	}
-	if _, err := tw.Write([]byte(pubKey)); err != nil {
-		return err
-	}
-	if err := tw.Close(); err != nil {
-		return err
-	}
-
 	return nil
-
 }
 
 func (d *Driver) Start() error {
@@ -405,10 +433,15 @@ func (d *Driver) validateVMRef() {
 
 func (d *Driver) GetIP() (string, error) {
 	log.Debugf("GetIP called for %s", d.MachineName)
-
+	
+	
+	 d.initConnection()
+	 d.initVM()
+	
 	ip, err := ntnxAPI.GetVMIP(&d.nc,&d.vm)
 	return ip, err
 }
+
 
 func (d *Driver) publicSSHKeyPath() string {
 	return d.GetSSHKeyPath() + ".pub"
@@ -419,9 +452,101 @@ func (d *Driver) GetSSHKeyPath() string {
 	return d.ResolveStorePath("id_rsa")
 }
 
+// Make a boot2docker userdata.tar key bundle
+func (d *Driver) generateKeyBundle() error {
+	log.Debugf("Creating Tar key bundle...")
+
+	magicString := "boot2docker, this is Nutanix speaking"
+
+	tf, err := os.Create(d.ResolveStorePath("userdata.tar"))
+	if err != nil {
+		return err
+	}
+	defer tf.Close()
+	var fileWriter = tf
+
+	tw := tar.NewWriter(fileWriter)
+	defer tw.Close()
+
+	// magicString first so we can figure out who originally wrote the tar.
+	file := &tar.Header{Name: magicString, Size: int64(len(magicString))}
+	if err := tw.WriteHeader(file); err != nil {
+		return err
+	}
+	if _, err := tw.Write([]byte(magicString)); err != nil {
+		return err
+	}
+	// .ssh/key.pub => authorized_keys
+	file = &tar.Header{Name: ".ssh", Typeflag: tar.TypeDir, Mode: 0700}
+	if err := tw.WriteHeader(file); err != nil {
+		return err
+	}
+	pubKey, err := ioutil.ReadFile(d.publicSSHKeyPath())
+	if err != nil {
+		return err
+	}
+	file = &tar.Header{Name: ".ssh/authorized_keys", Size: int64(len(pubKey)), Mode: 0644}
+	if err := tw.WriteHeader(file); err != nil {
+		return err
+	}
+	if _, err := tw.Write([]byte(pubKey)); err != nil {
+		return err
+	}
+	file = &tar.Header{Name: ".ssh/authorized_keys2", Size: int64(len(pubKey)), Mode: 0644}
+	if err := tw.WriteHeader(file); err != nil {
+		return err
+	}
+	if _, err := tw.Write([]byte(pubKey)); err != nil {
+		return err
+	}
+	if err := tw.Close(); err != nil {
+		return err
+	}
+
+	return nil
+
+}
+
+func (d *Driver) initConnection() error {
+	d.nc = ntnxAPI.NTNXConnection { defaultHost, defaultUser, defaultPass, "",  http.Client{}}
+		 	
+	ntnxAPI.EncodeCredentials(&d.nc)
+	ntnxAPI.CreateHttpClient(&d.nc)
+	
+	return nil
+}
+
+func (d *Driver) initVM() error {
+	
+	d.vm = ntnxAPI.VM { d.MemoryMB , d.MachineName, d.Vcpus, d.NetworkName, ""}
+	
+	if UUID, err := ntnxAPI.GetVMIDbyName(&d.nc,d.MachineName); err != nil {
+		log.Infof("VM doesn't exist anymore or is not unique")
+	} else {
+	d.vm.UUID = UUID
+	}
+	
+	return nil
+}
+
+func check(e error) {
+    if e != nil {
+        panic(e)
+    }
+}
+
+
+func GetPerm(f *os.File) (perm string) {
+	fileStat, _ := f.Stat()
+	mod := fileStat.Mode().Perm()
+	return fmt.Sprintf("%04o", uint32(mod))
+}
+
 
 func NewDriver(hostName, storePath string) drivers.Driver {
 
 	return &Driver{	}
 	
 }
+
+
